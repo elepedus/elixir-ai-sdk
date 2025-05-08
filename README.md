@@ -44,15 +44,29 @@ IO.puts(result.text)
   prompt: "Why is the sky blue?"
 })
 
-# Process chunks as they arrive
-result.stream
-|> Stream.each(fn
-  {:text_delta, chunk} -> IO.write(chunk)
-  {:finish, reason} -> IO.puts("\nFinished: #{reason}")
-  {:error, error} -> IO.puts("\nError: #{inspect(error)}")
-  _ -> :ok
+# Process chunks as they arrive (safely with proper termination)
+r = Enum.reduce_while(result.stream, [], fn
+  # Text chunk received - print it and continue
+  {:text_delta, chunk}, acc ->
+    IO.write(chunk)
+    {:cont, [chunk | acc]}
+    
+  # Stream finished - print reason and halt collection
+  {:finish, reason}, acc ->
+    IO.puts("\nFinished: #{reason}")
+    {:halt, acc}
+    
+  # Error received - print it and halt collection
+  {:error, error}, acc ->
+    IO.puts("\nError: #{inspect(error)}")
+    {:halt, acc}
+    
+  # Other events - just continue
+  _, acc ->
+    {:cont, acc}
 end)
-|> Stream.run()
+
+IO.inspect(r, label: "Collected chunks")
 ```
 
 ## Architecture

@@ -274,13 +274,13 @@ defmodule AI.Providers.OpenAICompatible.ChatLanguageModel do
     # Create a stream that processes each SSE event from the EventSource response
     Stream.resource(
       # Initialize with the source stream and initial state
-      fn -> {response.stream, %{finished: false}} end,
+      fn -> {response.stream, %{finished: false, seen_events: 0}} end,
       
       # Process each event from the input stream
       fn
         # If we're at the end, halt
-        {nil, _acc} -> 
-          {:halt, {nil, nil}}
+        {_stream, %{finished: true}} -> 
+          {:halt, nil}
           
         # Process the source stream
         {stream, acc} ->
@@ -288,47 +288,50 @@ defmodule AI.Providers.OpenAICompatible.ChatLanguageModel do
           case Enum.take(stream, 1) do
             # We got an event - process it
             [event | _] ->
+              # Count seen events to detect no more events
+              updated_acc = %{acc | seen_events: acc.seen_events + 1}
+              
               case event do
                 # Text delta - pass it through
                 {:text_delta, text} ->
-                  {[{:text_delta, text}], {stream, acc}}
+                  {[{:text_delta, text}], {stream, updated_acc}}
                   
-                # Finish event - remember we're finished but don't emit yet
+                # Finish event - emit it and mark as finished
                 {:finish, reason} ->
-                  {[], {stream, Map.put(acc, :finished, {:finish, reason})}}
+                  {[{:finish, reason}], {stream, %{updated_acc | finished: true}}}
                   
                 # Error event - pass through and mark finished
                 {:error, error} ->
-                  {[{:error, error}], {stream, %{finished: true}}}
+                  {[{:error, error}], {stream, %{updated_acc | finished: true}}}
                   
                 # Tool call - pass it through (for future tool call streaming)
                 {:tool_call, tool_call} ->
-                  {[{:tool_call, tool_call}], {stream, acc}}
+                  {[{:tool_call, tool_call}], {stream, updated_acc}}
                   
                 # Tool call delta - pass it through (for future tool call streaming)
                 {:tool_call_delta, id, delta} ->
-                  {[{:tool_call_delta, id, delta}], {stream, acc}}
+                  {[{:tool_call_delta, id, delta}], {stream, updated_acc}}
                   
                 # Pass through other events as metadata
                 other ->
-                  {[{:metadata, other}], {stream, acc}}
+                  {[{:metadata, other}], {stream, updated_acc}}
               end
               
-            # Stream is empty, we're done
+            # Stream is empty, either we're done or need to keep waiting
             [] -> 
-              {:halt, {nil, acc}}
+              if acc.seen_events > 0 do
+                # We've seen events before but now there are none, so we're done
+                # Emit a finish event if we haven't already
+                {[{:finish, "complete"}], {stream, %{acc | finished: true}}}
+              else
+                # No events seen yet, keep waiting
+                {[], {stream, acc}}
+              end
           end
       end,
       
-      # Cleanup function - emit finish event if we had one
-      fn {_stream, acc} ->
-        case acc do
-          %{finished: {:finish, reason}} -> 
-            [{:finish, reason}]
-          _ -> 
-            []
-        end
-      end
+      # Cleanup function - nothing to do here
+      fn _ -> :ok end
     )
   end
 

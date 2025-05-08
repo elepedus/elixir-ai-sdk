@@ -218,32 +218,59 @@ defmodule AI.Provider.Utils.EventSource do
   defp start_streaming_request(request, options) do
     if Code.ensure_loaded?(Finch) do
       try do
+        # Add debug output to help diagnose streaming issues
+        IO.puts("Starting Finch.stream request to #{options.url}")
+        
         # Define callback function for stream processing
-        callback = fn
-          {:status, status} ->
-            send(options.owner, {:sse_status, options.ref, status})
-          {:headers, headers} ->
-            send(options.owner, {:sse_headers, options.ref, headers})
-          {:data, data} ->
-            send(options.owner, {:sse_data, options.ref, data})
-          :done ->
-            send(options.owner, {:sse_done, options.ref})
-          {:error, error} ->
-            send(options.owner, {:sse_error, options.ref, error})
+        # The callback should match the Finch.stream/5 signature:
+        # For each chunk: fun(command, acc) -> {:cont, new_acc} | {:halt, new_acc}
+        callback = fn command, _acc ->
+          # Debug output for all streaming events
+          IO.puts("Finch stream event: #{inspect(command)}")
+          
+          case command do
+            {:status, status} ->
+              IO.puts("HTTP Status: #{status}")
+              send(options.owner, {:sse_status, options.ref, status})
+              {:cont, nil}
+            {:headers, headers} ->
+              IO.puts("HTTP Headers: #{inspect(headers)}")
+              send(options.owner, {:sse_headers, options.ref, headers})
+              {:cont, nil}
+            {:data, data} ->
+              data_preview = if byte_size(data) > 100, do: binary_part(data, 0, 100) <> "...", else: data
+              IO.puts("Received data: #{inspect(data_preview)}")
+              send(options.owner, {:sse_data, options.ref, data})
+              {:cont, nil}
+            :done ->
+              IO.puts("Stream done event received")
+              send(options.owner, {:sse_done, options.ref})
+              {:cont, nil}
+            {:error, error} ->
+              IO.puts("Stream error: #{inspect(error)}")
+              send(options.owner, {:sse_error, options.ref, error})
+              {:halt, nil}
+          end
         end
         
         # Start the Finch stream with callback
-        _finch_opts = [receive_timeout: options.timeout]
+        finch_opts = [receive_timeout: options.timeout]
         
-        # Call the Finch.stream function directly
-        case Finch.stream(request, AI.Finch, options.ref, callback) do
+        # Call the Finch.stream function with correct parameters
+        # Finch.stream(request, name, initial_acc, streaming_function, options)
+        case Finch.stream(request, AI.Finch, nil, callback, finch_opts) do
           {:ok, _ref} -> :ok
           {:error, error} -> send(options.owner, {:sse_error, options.ref, error})
         end
       rescue
         e ->
-          # Handle any errors during Finch setup
-          send(options.owner, {:sse_error, options.ref, {:finch_error, e}})
+          # Handle any errors during Finch setup with detailed error information
+          detailed_error = %{
+            module: e.__struct__, 
+            message: Exception.message(e),
+            stacktrace: __STACKTRACE__
+          }
+          send(options.owner, {:sse_error, options.ref, {:finch_error, detailed_error}})
       end
     else
       # Finch not available
@@ -299,21 +326,104 @@ defmodule AI.Provider.Utils.EventSource do
         # Stream error
         {[{:error, error}], %{state | error: error, finished: true}}
         
-      after 10000 ->
-        # Timeout after 10 seconds of inactivity
-        error = "SSE stream timeout after 10 seconds of inactivity"
-        {[{:error, error}], %{state | error: error, finished: true}}
+      after 5000 ->  # Increased the timeout to allow more time for streaming to complete
+        # Some LLM servers might send a completion but not explicitly send 
+        # a finish event (LMStudio seems to do this). Instead of treating
+        # this as an error, emit a finish event if we've received some data.
+        if state.data != [] do
+          # We have received some data, so emit it and a finish event
+          events = [format_sse_event(state), {:finish, "complete"}]
+          {events, %{state | finished: true}}
+        else
+          # No data received and timeout - continue waiting
+          get_next_event(state)
+        end
     end
   end
   
   @spec process_data_chunk(map(), binary()) :: {[stream_event()], map()}
-  # Process a chunk of SSE data
+  # Process a chunk of SSE data - directly parse OpenAI compatible format
   defp process_data_chunk(state, chunk) do
-    # Append chunk to buffer
-    buffer = state.buffer <> chunk
+    # Print chunk for debugging
+    IO.puts("Processing chunk: #{inspect(chunk)}")
     
-    # Process lines in the buffer
-    process_buffer_lines(state, buffer, [])
+    # Check for the special "data: [DONE]" pattern directly
+    if String.contains?(chunk, "data: [DONE]") do
+      IO.puts("Found [DONE] marker - stream complete")
+      # Emit any remaining data and a finish event
+      events = 
+        if state.data != [] do
+          [format_sse_event(state), {:finish, "stop"}]
+        else
+          [{:finish, "stop"}]
+        end
+      
+      # Save the finish event to our global agent if it exists
+      stream_agent = Application.get_env(:ai_sdk, :stream_agent)
+      if not is_nil(stream_agent) do
+        Agent.update(stream_agent, fn state ->
+          IO.puts("Adding DONE event to agent: #{inspect({:finish, "stop"})}")
+          new_state = Map.update(state, :events, [{:finish, "stop"}], fn events -> 
+            events ++ [{:finish, "stop"}]
+          end)
+          Map.put(new_state, :done, true)
+        end)
+      end
+      
+      # Mark as finished and return events
+      {events, %{state | finished: true}}
+    else
+      # Handle regular SSE data from LMStudio/OpenAI format
+      case Regex.run(~r/data: ({.+})/, chunk) do
+        [_, json_str] ->
+          # Found JSON data, try to parse it
+          IO.puts("Found JSON data: #{json_str}")
+          case Jason.decode(json_str) do
+            {:ok, parsed} ->
+              # Successfully parsed JSON, extract content
+              IO.puts("Successfully parsed JSON")
+              
+              # Get delta content if available
+              content = get_in(parsed, ["choices", Access.at(0), "delta", "content"])
+              finish_reason = get_in(parsed, ["choices", Access.at(0), "finish_reason"])
+              
+              # Create event based on content and finish reason
+              {event, _is_finish} = cond do
+                # If we have content, emit a text delta
+                not is_nil(content) and content != "" ->
+                  IO.puts("Content found: #{inspect(content)}")
+                  {{:text_delta, content}, false}
+                
+                # If we have a finish reason, emit a finish event
+                not is_nil(finish_reason) and finish_reason != "" ->
+                  IO.puts("Finish reason found: #{inspect(finish_reason)}")
+                  {{:finish, finish_reason}, true}
+                
+                # Default to metadata
+                true ->
+                  {{:metadata, parsed}, false}
+              end
+              
+              {[event], state}
+              
+            _ ->
+              # Invalid JSON, just append to buffer and continue normally
+              IO.puts("Failed to parse JSON, using normal SSE parsing")
+              # Append chunk to buffer
+              buffer = state.buffer <> chunk
+              # Process lines in the buffer
+              process_buffer_lines(state, buffer, [])
+          end
+          
+        _ ->
+          # No JSON pattern found, use normal SSE parsing
+          IO.puts("No JSON pattern found, using normal SSE parsing")
+          # Append chunk to buffer
+          buffer = state.buffer <> chunk
+          # Process lines in the buffer
+          process_buffer_lines(state, buffer, [])
+      end
+    end
   end
   
   @spec process_buffer_lines(map(), binary(), [stream_event()]) :: {[stream_event()], map()}
@@ -361,7 +471,13 @@ defmodule AI.Provider.Utils.EventSource do
       # Data field
       String.starts_with?(line, "data:") ->
         data = String.trim(String.slice(line, 5..-1//1))
-        {%{state | data: state.data ++ [data]}, []}
+        # Check for special [DONE] marker that LMStudio uses
+        if data == "[DONE]" do
+          # Stream is done
+          {%{state | finished: true}, [{:finish, "complete"}]}
+        else
+          {%{state | data: state.data ++ [data]}, []}
+        end
         
       # ID field
       String.starts_with?(line, "id:") ->
@@ -419,17 +535,48 @@ defmodule AI.Provider.Utils.EventSource do
     # Try to extract content delta if this is OpenAI format
     case get_in(data, ["choices", Access.at(0), "delta", "content"]) do
       nil -> 
-        # Check if this is a finish event
-        finish_reason = get_in(data, ["choices", Access.at(0), "finish_reason"])
-        if not is_nil(finish_reason) and finish_reason != "" do
-          {:finish, finish_reason}
-        else
-          # Just metadata
-          {:metadata, data}
+        # Some providers don't follow the OpenAI format exactly - check for alternatives
+        cond do
+          # Check if this is a finish event in standard format
+          finish_reason = get_in(data, ["choices", Access.at(0), "finish_reason"]) ->
+            if not is_nil(finish_reason) and finish_reason != "" do
+              {:finish, finish_reason}
+            else
+              # Just metadata
+              {:metadata, data}
+            end
+            
+          # Check for "content" at the top level (some providers do this)
+          content = Map.get(data, "content") ->
+            if is_binary(content) do
+              {:text_delta, content}
+            else
+              {:metadata, data}
+            end
+            
+          # Check for "text" key (some providers use this format)
+          text = Map.get(data, "text") ->
+            if is_binary(text) do
+              {:text_delta, text}
+            else
+              {:metadata, data}
+            end
+            
+          # Check in "message" (some local LLMs do this)
+          message_content = get_in(data, ["message", "content"]) ->
+            if is_binary(message_content) do
+              {:text_delta, message_content}
+            else
+              {:metadata, data}
+            end
+            
+          # Default case - just metadata
+          true ->
+            {:metadata, data}
         end
         
       content -> 
-        # Text content delta
+        # Text content delta in standard OpenAI format
         {:text_delta, content}
     end
   end
