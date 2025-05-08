@@ -5,9 +5,11 @@ An Elixir port of the [Vercel AI SDK](https://ai-sdk.dev/), designed to help you
 ## Features
 
 - **Text Generation**: Generate text using Large Language Models (LLMs)
-- **Streaming**: Stream text responses from LLMs
+- **Real-time Streaming**: Stream text responses chunk-by-chunk as they're generated
+- **Server-Sent Events (SSE)**: Efficient streaming with proper backpressure handling
 - **Tool Calling**: Call tools and functions from LLMs
 - **Provider Support**: Support for popular AI providers (OpenAI, Anthropic, etc.)
+- **Elixir Integration**: Seamless integration with Elixir's Stream API
 
 ## Installation
 
@@ -19,7 +21,9 @@ def deps do
 end
 ```
 
-## Usage Example
+## Usage Examples
+
+### Text Generation
 
 ```elixir
 {:ok, result} = AI.generate_text(%{
@@ -31,14 +35,43 @@ end
 IO.puts(result.text)
 ```
 
+### Streaming Text Generation
+
+```elixir
+{:ok, result} = AI.stream_text(%{
+  model: AI.openai("gpt-4o"),
+  system: "You are a friendly assistant!",
+  prompt: "Why is the sky blue?"
+})
+
+# Process chunks as they arrive
+result.stream
+|> Stream.each(fn
+  {:text_delta, chunk} -> IO.write(chunk)
+  {:finish, reason} -> IO.puts("\nFinished: #{reason}")
+  {:error, error} -> IO.puts("\nError: #{inspect(error)}")
+  _ -> :ok
+end)
+|> Stream.run()
+```
+
 ## Architecture
 
 The Elixir AI SDK follows similar patterns to the original Vercel AI SDK but uses Elixir idioms and patterns:
 
-- GenServer-based streaming
-- Elixir-native error handling
+- Stream-based API for real-time text generation
+- Server-Sent Events (SSE) for efficient streaming
+- Proper backpressure handling for large responses
+- Elixir-native error handling with tagged tuples
 - Phoenix integration for web applications
 
 ## Development Status
 
 This project is under active development. See the [project roadmap](ROADMAP.md) for more information.
+
+## Documentation
+
+- [Getting Started](docs/getting-started.md)
+- [Streaming Guide](docs/streaming.md) - Real-time text generation with SSE
+- [Tool Calling](docs/tool-calling.md) - Function calling capabilities
+- [Provider Integration](docs/providers.md) - Using different AI providers

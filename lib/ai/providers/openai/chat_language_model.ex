@@ -141,19 +141,6 @@ defmodule AI.Providers.OpenAI.ChatLanguageModel do
   end
 
   @impl LanguageModelV1
-  def do_stream(%__MODULE__{settings: %{simulate_streaming: true}} = model, options) do
-    # We don't need to use adapted_options here since we're calling do_generate
-    # which will convert the options itself
-    case do_generate(model, options) do
-      {:ok, result} ->
-        stream = simulate_stream(result)
-        {:ok, %{stream: stream, raw_call: result.raw_call, warnings: result.warnings}}
-
-      error ->
-        error
-    end
-  end
-
   def do_stream(%__MODULE__{} = model, options) do
     # Convert options for consistency with do_generate
     adapted_options = convert_options(options)
@@ -164,7 +151,10 @@ defmodule AI.Providers.OpenAI.ChatLanguageModel do
     url = get_url(model, "/chat/completions")
     headers = get_headers(model, adapted_options)
 
-    case EventSource.post(url, body, headers, adapted_options) do
+    # Get the EventSource module from application config, fallback to real module
+    event_source_module = Application.get_env(:ai_sdk, :event_source_module, EventSource)
+
+    case event_source_module.post(url, body, headers, adapted_options) do
       {:ok, response} ->
         handle_stream_response(response, body, warnings, model.settings)
 
@@ -514,13 +504,70 @@ defmodule AI.Providers.OpenAI.ChatLanguageModel do
      }}
   end
 
-  defp handle_stream_response(_response, body, warnings, _settings) do
-    # TODO: Implement stream response handling
-    {:ok, %{stream: %{}, raw_call: body, warnings: warnings}}
+  def handle_stream_response(response, body, warnings, _settings) do
+    # Process the stream from the EventSource response
+    # We want to pass through text deltas but also keep track of finish events
+    stream = 
+      Stream.resource(
+        # Initialize with the source stream and initial state
+        fn -> {response.stream, %{finished: false}} end,
+        
+        # Process each event from the input stream
+        fn
+          # If we're at the end, halt
+          {nil, _acc} -> 
+            {:halt, {nil, nil}}
+            
+          # Process the source stream
+          {stream, acc} ->
+            # Try to get the next event
+            case Enum.take(stream, 1) do
+              # We got an event - process it
+              [event | _] ->
+                case event do
+                  # Text delta - pass it through
+                  {:text_delta, text} ->
+                    {[{:text_delta, text}], {stream, acc}}
+                    
+                  # Finish event - remember we're finished but don't emit yet
+                  {:finish, reason} ->
+                    {[], {stream, Map.put(acc, :finished, {:finish, reason})}}
+                    
+                  # Error event - pass through and mark finished
+                  {:error, error} ->
+                    {[{:error, error}], {stream, %{finished: true}}}
+                    
+                  # Tool call - pass it through (for future tool call streaming)
+                  {:tool_call, tool_call} ->
+                    {[{:tool_call, tool_call}], {stream, acc}}
+                    
+                  # Tool call delta - pass it through (for future tool call streaming)
+                  {:tool_call_delta, id, delta} ->
+                    {[{:tool_call_delta, id, delta}], {stream, acc}}
+                    
+                  # Ignore other events
+                  _ ->
+                    {[], {stream, acc}}
+                end
+                
+              # Stream is empty, we're done
+              [] -> 
+                {:halt, {nil, acc}}
+            end
+        end,
+        
+        # Cleanup function - emit finish event if we had one
+        fn {_stream, acc} ->
+          case acc do
+            %{finished: {:finish, reason}} -> 
+              [{:finish, reason}]
+            _ -> 
+              []
+          end
+        end
+      )
+    
+    {:ok, %{stream: stream, raw_call: body, warnings: warnings}}
   end
 
-  defp simulate_stream(_result) do
-    # TODO: Implement stream simulation
-    %{}
-  end
 end

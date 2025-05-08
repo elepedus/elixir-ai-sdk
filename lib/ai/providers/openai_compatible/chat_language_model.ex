@@ -5,6 +5,8 @@ defmodule AI.Providers.OpenAICompatible.ChatLanguageModel do
   This module implements the language model interface for OpenAI-compatible APIs.
   """
 
+  alias AI.Provider.Utils.EventSource
+
   defstruct [
     :provider,
     :model_id,
@@ -209,5 +211,137 @@ defmodule AI.Providers.OpenAICompatible.ChatLanguageModel do
   # Format provider name to handle dashes, underscores, etc.
   defp format_provider_name(name) when is_binary(name) do
     name
+  end
+
+  @doc """
+  Stream text generation using the OpenAI-compatible API.
+
+  This function enables streaming responses from the model, returning chunks
+  as they are generated rather than waiting for the complete response.
+
+  ## Options
+    * `:messages` - List of messages to send to the API (required)
+    * `:temperature` - Temperature for sampling (default: 1.0)
+    * `:max_tokens` - Maximum number of tokens to generate (optional)
+    * `:tools` - List of tools available to the model (optional)
+    * `:tool_choice` - Tool choice configuration (optional)
+    * `:response_format` - Response format configuration (optional)
+  """
+  def do_stream(model, opts) do
+    messages = Map.get(opts, :messages, [])
+
+    # Convert messages to OpenAI-compatible format
+    openai_messages = MessageConversion.convert_to_openai_compatible_chat_messages(messages)
+
+    # Build request body
+    request_body = %{
+      model: model.model_id,
+      messages: openai_messages,
+      stream: true
+    }
+
+    # Add optional parameters if provided
+    request_body = add_optional_params(request_body, opts)
+
+    # Create URL and headers
+    url = "#{model.provider.base_url}/v1/chat/completions"
+    headers = ensure_headers_map(model.provider.headers)
+
+    # Get the EventSource module to use (allows mocking)
+    event_source_module = Application.get_env(:ai_sdk, :event_source_module, EventSource)
+    
+    # Make streaming API request
+    case event_source_module.post(url, request_body, headers, opts) do
+      {:ok, response} ->
+        stream = process_stream_events(response)
+        
+        {:ok, %{
+          stream: stream,
+          warnings: [],
+          raw_response: %{
+            request_body: request_body,
+            url: url
+          }
+        }}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  # Process streaming events into a unified stream
+  defp process_stream_events(response) do
+    # Create a stream that processes each SSE event from the EventSource response
+    Stream.resource(
+      # Initialize with the source stream and initial state
+      fn -> {response.stream, %{finished: false}} end,
+      
+      # Process each event from the input stream
+      fn
+        # If we're at the end, halt
+        {nil, _acc} -> 
+          {:halt, {nil, nil}}
+          
+        # Process the source stream
+        {stream, acc} ->
+          # Try to get the next event
+          case Enum.take(stream, 1) do
+            # We got an event - process it
+            [event | _] ->
+              case event do
+                # Text delta - pass it through
+                {:text_delta, text} ->
+                  {[{:text_delta, text}], {stream, acc}}
+                  
+                # Finish event - remember we're finished but don't emit yet
+                {:finish, reason} ->
+                  {[], {stream, Map.put(acc, :finished, {:finish, reason})}}
+                  
+                # Error event - pass through and mark finished
+                {:error, error} ->
+                  {[{:error, error}], {stream, %{finished: true}}}
+                  
+                # Tool call - pass it through (for future tool call streaming)
+                {:tool_call, tool_call} ->
+                  {[{:tool_call, tool_call}], {stream, acc}}
+                  
+                # Tool call delta - pass it through (for future tool call streaming)
+                {:tool_call_delta, id, delta} ->
+                  {[{:tool_call_delta, id, delta}], {stream, acc}}
+                  
+                # Pass through other events as metadata
+                other ->
+                  {[{:metadata, other}], {stream, acc}}
+              end
+              
+            # Stream is empty, we're done
+            [] -> 
+              {:halt, {nil, acc}}
+          end
+      end,
+      
+      # Cleanup function - emit finish event if we had one
+      fn {_stream, acc} ->
+        case acc do
+          %{finished: {:finish, reason}} -> 
+            [{:finish, reason}]
+          _ -> 
+            []
+        end
+      end
+    )
+  end
+
+  # Convert headers to map format for EventSource
+  defp ensure_headers_map(headers) when is_list(headers) do
+    Enum.into(headers, %{})
+  end
+
+  defp ensure_headers_map(headers) when is_map(headers) do
+    headers
+  end
+
+  defp ensure_headers_map(_) do
+    %{}
   end
 end
