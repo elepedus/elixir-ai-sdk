@@ -78,4 +78,22 @@ This file contains all the tests we need to implement for the Elixir AI SDK, bas
   - [ ] Handle tool execution errors (`/vercel-ai-sdk/packages/ai/core/generate-text/generate-text.test.ts:1818-1855`)
 
 ## Stream Text Tests
-(To be added in future)
+
+- [x] **Basic Text Generation Streaming**
+  - [x] Initialize a basic text stream with mock model
+  - [x] Stream text from OpenAI provider
+  - [x] Handle streaming errors gracefully
+  - [x] Stream with system message correctly
+
+- [x] **Server-Sent Events (SSE) Implementation**
+  - [x] Initialize an SSE stream with proper HTTP headers
+  - [x] Parse SSE events correctly (data, event, id fields)
+  - [x] Handle multi-line data in SSE events
+  - [x] Process JSON content in SSE data fields
+  - [x] Support error handling and stream cancellation
+
+- [ ] **Advanced Streaming Features**
+  - [ ] Stream with tool calls and function calling
+  - [ ] Handle streaming cancellation
+  - [ ] Implement backpressure handling
+  - [ ] Support for structured output streaming
