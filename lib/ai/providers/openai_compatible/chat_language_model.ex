@@ -249,20 +249,21 @@ defmodule AI.Providers.OpenAICompatible.ChatLanguageModel do
 
     # Get the EventSource module to use (allows mocking)
     event_source_module = Application.get_env(:ai_sdk, :event_source_module, EventSource)
-    
+
     # Make streaming API request
     case event_source_module.post(url, request_body, headers, opts) do
       {:ok, response} ->
         stream = process_stream_events(response)
-        
-        {:ok, %{
-          stream: stream,
-          warnings: [],
-          raw_response: %{
-            request_body: request_body,
-            url: url
-          }
-        }}
+
+        {:ok,
+         %{
+           stream: stream,
+           warnings: [],
+           raw_response: %{
+             request_body: request_body,
+             url: url
+           }
+         }}
 
       {:error, error} ->
         {:error, error}
@@ -271,68 +272,18 @@ defmodule AI.Providers.OpenAICompatible.ChatLanguageModel do
 
   # Process streaming events into a unified stream
   defp process_stream_events(response) do
-    # Create a stream that processes each SSE event from the EventSource response
-    Stream.resource(
-      # Initialize with the source stream and initial state
-      fn -> {response.stream, %{finished: false, seen_events: 0}} end,
-      
-      # Process each event from the input stream
-      fn
-        # If we're at the end, halt
-        {_stream, %{finished: true}} -> 
-          {:halt, nil}
-          
-        # Process the source stream
-        {stream, acc} ->
-          # Try to get the next event
-          case Enum.take(stream, 1) do
-            # We got an event - process it
-            [event | _] ->
-              # Count seen events to detect no more events
-              updated_acc = %{acc | seen_events: acc.seen_events + 1}
-              
-              case event do
-                # Text delta - pass it through
-                {:text_delta, text} ->
-                  {[{:text_delta, text}], {stream, updated_acc}}
-                  
-                # Finish event - emit it and mark as finished
-                {:finish, reason} ->
-                  {[{:finish, reason}], {stream, %{updated_acc | finished: true}}}
-                  
-                # Error event - pass through and mark finished
-                {:error, error} ->
-                  {[{:error, error}], {stream, %{updated_acc | finished: true}}}
-                  
-                # Tool call - pass it through (for future tool call streaming)
-                {:tool_call, tool_call} ->
-                  {[{:tool_call, tool_call}], {stream, updated_acc}}
-                  
-                # Tool call delta - pass it through (for future tool call streaming)
-                {:tool_call_delta, id, delta} ->
-                  {[{:tool_call_delta, id, delta}], {stream, updated_acc}}
-                  
-                # Pass through other events as metadata
-                other ->
-                  {[{:metadata, other}], {stream, updated_acc}}
-              end
-              
-            # Stream is empty, either we're done or need to keep waiting
-            [] -> 
-              if acc.seen_events > 0 do
-                # We've seen events before but now there are none, so we're done
-                # Emit a finish event if we haven't already
-                {[{:finish, "complete"}], {stream, %{acc | finished: true}}}
-              else
-                # No events seen yet, keep waiting
-                {[], {stream, acc}}
-              end
-          end
-      end,
-      
-      # Cleanup function - nothing to do here
-      fn _ -> :ok end
-    )
+    # Use the OpenAI Compatible transformer to convert the raw stream to standardized events
+    alias AI.Stream.OpenAICompatibleTransformer
+    alias AI.Stream.Event
+
+    # Transform the response stream using our dedicated transformer
+    transformed_stream =
+      OpenAICompatibleTransformer.transform(response.stream, %{
+        detect_end_of_stream: true
+      })
+
+    # Convert the transformed stream (now containing Event structs) back to tuple format
+    Stream.map(transformed_stream, &Event.to_tuple/1)
   end
 
   # Convert headers to map format for EventSource

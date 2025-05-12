@@ -5,7 +5,8 @@ defmodule AI.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {Finch, name: AI.Finch}
+      {Finch, name: AI.Finch},
+      AI.ProviderRegistry
     ]
 
     opts = [strategy: :one_for_one, name: AI.Supervisor]

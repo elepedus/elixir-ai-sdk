@@ -505,69 +505,17 @@ defmodule AI.Providers.OpenAI.ChatLanguageModel do
   end
 
   def handle_stream_response(response, body, warnings, _settings) do
-    # Process the stream from the EventSource response
-    # We want to pass through text deltas but also keep track of finish events
-    stream = 
-      Stream.resource(
-        # Initialize with the source stream and initial state
-        fn -> {response.stream, %{finished: false}} end,
-        
-        # Process each event from the input stream
-        fn
-          # If we're at the end, halt
-          {nil, _acc} -> 
-            {:halt, {nil, nil}}
-            
-          # Process the source stream
-          {stream, acc} ->
-            # Try to get the next event
-            case Enum.take(stream, 1) do
-              # We got an event - process it
-              [event | _] ->
-                case event do
-                  # Text delta - pass it through
-                  {:text_delta, text} ->
-                    {[{:text_delta, text}], {stream, acc}}
-                    
-                  # Finish event - remember we're finished but don't emit yet
-                  {:finish, reason} ->
-                    {[], {stream, Map.put(acc, :finished, {:finish, reason})}}
-                    
-                  # Error event - pass through and mark finished
-                  {:error, error} ->
-                    {[{:error, error}], {stream, %{finished: true}}}
-                    
-                  # Tool call - pass it through (for future tool call streaming)
-                  {:tool_call, tool_call} ->
-                    {[{:tool_call, tool_call}], {stream, acc}}
-                    
-                  # Tool call delta - pass it through (for future tool call streaming)
-                  {:tool_call_delta, id, delta} ->
-                    {[{:tool_call_delta, id, delta}], {stream, acc}}
-                    
-                  # Ignore other events
-                  _ ->
-                    {[], {stream, acc}}
-                end
-                
-              # Stream is empty, we're done
-              [] -> 
-                {:halt, {nil, acc}}
-            end
-        end,
-        
-        # Cleanup function - emit finish event if we had one
-        fn {_stream, acc} ->
-          case acc do
-            %{finished: {:finish, reason}} -> 
-              [{:finish, reason}]
-            _ -> 
-              []
-          end
-        end
-      )
-    
-    {:ok, %{stream: stream, raw_call: body, warnings: warnings}}
-  end
+    # Use the OpenAI transformer to convert the raw stream to standardized events
+    alias AI.Stream.OpenAITransformer
+    alias AI.Stream.Event
 
+    # Transform the response stream using our dedicated transformer
+    transformed_stream = OpenAITransformer.transform(response.stream)
+
+    # Convert the transformed stream (now containing Event structs) back to tuple format
+    # This maintains compatibility with the current API while we refactor
+    final_stream = Stream.map(transformed_stream, &Event.to_tuple/1)
+
+    {:ok, %{stream: final_stream, raw_call: body, warnings: warnings}}
+  end
 end

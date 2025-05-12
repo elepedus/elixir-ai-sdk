@@ -28,7 +28,8 @@ defmodule AI.MixProject do
       {:jason, "~> 1.4"},
       {:ex_doc, "~> 0.29", only: :dev, runtime: false},
       {:finch, "~> 0.16"},
-      {:mox, "~> 1.2", only: :test}
+      {:mox, "~> 1.2", only: :test},
+      {:openai_ex, "~> 0.9.7", only: :test}
     ]
   end
 
