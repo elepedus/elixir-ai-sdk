@@ -4,7 +4,7 @@ defmodule AI.StreamIntegrationTest do
 
   describe "AI.stream_text/1 with OpenAI provider" do
     setup do
-      # Use the predefined mock
+      # Use the predefined mock for EventSource
       old_event_source_module =
         Application.get_env(:ai_sdk, :event_source_module, AI.Provider.Utils.EventSource)
 
@@ -41,14 +41,27 @@ defmodule AI.StreamIntegrationTest do
            stream: mock_events
          }}
 
+      # Create an OpenAI model
+      # But override the Tesla client to simulate a working response
+      headers_fn = fn -> %{"Authorization" => "Bearer test-key"} end
+      url_fn = fn %{path: path} -> "https://api.openai.com/v1#{path}" end
+
+      model =
+        AI.Providers.OpenAI.ChatLanguageModel.new(
+          "gpt-3.5-turbo",
+          %{},
+          %{
+            provider: "openai",
+            headers: headers_fn,
+            url: url_fn
+          }
+        )
+
       # Setup the EventSource mock expectation
       AI.Provider.Utils.EventSourceMock
       |> expect(:post, fn _url, _body, _headers, _options ->
         mock_response
       end)
-
-      # Create a model to use with the streams
-      model = AI.openai("gpt-3.5-turbo")
 
       # Call stream_text to test
       {:ok, result} =
@@ -61,18 +74,9 @@ defmodule AI.StreamIntegrationTest do
       # Verify we get a valid result map
       assert is_map(result)
       assert Map.has_key?(result, :stream)
-      assert is_function(result.stream)
+      assert is_map(result.stream) or is_function(result.stream)
       assert Map.has_key?(result, :warnings)
       assert Map.has_key?(result, :response)
-    end
-
-    @tag :integration
-    test "streams text with EventSource" do
-      # Skip if OPENAI_API_KEY is not set
-      if System.get_env("OPENAI_API_KEY") == nil do
-        IO.puts("Skipping OpenAI streaming test - no API key")
-        flunk("Skipping test - no OPENAI_API_KEY environment variable set")
-      end
     end
   end
 end

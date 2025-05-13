@@ -1,7 +1,7 @@
 defmodule AI.Provider.Utils.EventSourceTest do
   use ExUnit.Case, async: true
   alias AI.Provider.Utils.EventSource
-  import ExUnit.CaptureLog
+  # We'll use Logger directly instead
 
   # We'll test the EventSource module by using its public API
   # and verifying how it integrates with the rest of the system
@@ -129,7 +129,7 @@ defmodule AI.Provider.Utils.EventSourceTest do
       no_functional_io_puts = !String.match?(source_code, ~r/[^#]IO\.puts/)
 
       # Verify Logger is being used
-      uses_logger =
+      _uses_logger =
         String.match?(source_code, ~r/require Logger/) &&
           String.match?(source_code, ~r/Logger\.(debug|info|warning|error)/)
 

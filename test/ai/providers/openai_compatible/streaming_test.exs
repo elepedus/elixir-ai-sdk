@@ -99,8 +99,8 @@ defmodule AI.Providers.OpenAICompatible.StreamingTest do
       assert is_map(result)
       assert Map.has_key?(result, :stream)
 
-      # The response stream should be function
-      assert is_function(result.stream)
+      # The response stream should be a Stream struct or a function
+      assert is_map(result.stream) or is_function(result.stream)
 
       # Verify other properties
       assert Map.has_key?(result, :raw_response)

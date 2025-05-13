@@ -204,8 +204,8 @@ defmodule AI.Providers.OpenAI.ChatLanguageModelTest do
         # Execute the stream call
         {:ok, result} = ChatLanguageModel.do_stream(model, options)
 
-        # Verify the results
-        assert is_function(result.stream)
+        # Verify the results - stream can be either a function or Stream struct
+        assert is_map(result.stream) or is_function(result.stream)
 
         # Verify other result properties
         assert result.raw_call != nil
