@@ -36,12 +36,7 @@ defmodule AI.StreamTextTest do
       chunks = Enum.to_list(result.stream)
       IO.inspect(chunks, label: "Stream Chunks")
 
-      assert chunks == [
-               {:text_delta, "Hello"},
-               {:text_delta, ", "},
-               {:text_delta, "world"},
-               {:text_delta, "!"}
-             ]
+      assert chunks == ["Hello", ", ", "world", "!"]
     end
 
     test "streams text from OpenAI provider" do
@@ -93,7 +88,7 @@ defmodule AI.StreamTextTest do
 
         # Verify we get the expected fields
         assert Map.has_key?(result, :warnings)
-        assert Map.has_key?(result, :response)
+        assert Map.has_key?(result, :provider_metadata)
       after
         # Restore original module
         Application.put_env(:ai_sdk, :event_source_module, old_event_source_module)

@@ -53,14 +53,13 @@ defmodule AI.StreamTextIntegrationTest do
       events = Enum.to_list(result.stream)
 
       # Verify we got the expected number of events
-      assert length(events) == 5
+      assert length(events) == 4
 
       # Verify the events are in the correct order and format
-      assert Enum.at(events, 0) == {:text_delta, "Hello"}
-      assert Enum.at(events, 1) == {:text_delta, ", "}
-      assert Enum.at(events, 2) == {:text_delta, "world"}
-      assert Enum.at(events, 3) == {:text_delta, "!"}
-      assert Enum.at(events, 4) == {:finish, "stop"}
+      assert Enum.at(events, 0) == "Hello"
+      assert Enum.at(events, 1) == ", "
+      assert Enum.at(events, 2) == "world"
+      assert Enum.at(events, 3) == "!"
     end
   end
 end

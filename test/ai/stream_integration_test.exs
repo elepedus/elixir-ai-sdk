@@ -76,7 +76,7 @@ defmodule AI.StreamIntegrationTest do
       assert Map.has_key?(result, :stream)
       assert is_map(result.stream) or is_function(result.stream)
       assert Map.has_key?(result, :warnings)
-      assert Map.has_key?(result, :response)
+      assert Map.has_key?(result, :provider_metadata)
     end
   end
 end

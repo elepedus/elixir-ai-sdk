@@ -68,17 +68,38 @@ defmodule AI do
         prompt: "Why is the sky blue?"
       })
 
-      # Process chunks as they arrive
+      # Process chunks as they arrive - each chunk is a string
       result.stream
-      |> Stream.each(fn
-        {:text_delta, chunk} -> IO.write(chunk)
-        _ -> :ok
-      end)
+      |> Stream.each(&IO.write/1)
       |> Stream.run()
+
+      # Or collect all chunks into a single string
+      full_text = Enum.join(result.stream, "")
   """
   @spec stream_text(map()) :: {:ok, map()} | {:error, any()}
   def stream_text(options) do
-    StreamText.stream_text(options)
+    case StreamText.stream_text(options) do
+      {:ok, result} ->
+        # Convert the event-based stream to a simple text stream
+        text_only_stream =
+          result.stream
+          |> Stream.filter(fn
+            {:text_delta, _} -> true
+            _ -> false
+          end)
+          |> Stream.map(fn {:text_delta, chunk} -> chunk end)
+
+        # Return the result with the simplified stream
+        {:ok,
+         %{
+           stream: text_only_stream,
+           warnings: result.warnings,
+           provider_metadata: result.provider_metadata
+         }}
+
+      error ->
+        error
+    end
   end
 
   @doc """

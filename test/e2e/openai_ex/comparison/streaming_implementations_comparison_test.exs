@@ -143,14 +143,7 @@ defmodule AI.StreamingImplementationsComparisonTest do
         chunks = collect_ai_sdk_stream_content(response.stream)
 
         # Extract full content
-        content =
-          chunks
-          |> Enum.filter(fn
-            {:text_delta, _} -> true
-            _ -> false
-          end)
-          |> Enum.map(fn {:text_delta, text} -> text end)
-          |> Enum.join("")
+        content = Enum.join(chunks, "")
 
         {content, chunks}
       rescue
@@ -185,23 +178,14 @@ defmodule AI.StreamingImplementationsComparisonTest do
   # Helper to collect content from AI.stream_text stream
   defp collect_ai_sdk_stream_content(stream) do
     Enum.reduce_while(stream, [], fn
-      # Text delta events
-      {:text_delta, chunk} = event, acc ->
+      # Text chunks
+      chunk, acc when is_binary(chunk) ->
         IO.write(chunk)
-        {:cont, [event | acc]}
-
-      # Finish events
-      {:finish, reason} = event, acc ->
-        IO.puts("\nFinished: #{reason}")
-        {:halt, [event | acc]}
-
-      # Error events
-      {:error, error} = event, acc ->
-        IO.puts("\nError: #{inspect(error)}")
-        {:halt, [event | acc]}
+        {:cont, [chunk | acc]}
 
       # Other events
       other, acc ->
+        IO.puts("\nOther event: #{inspect(other)}")
         {:cont, [other | acc]}
     end)
     |> Enum.reverse()
@@ -211,14 +195,7 @@ defmodule AI.StreamingImplementationsComparisonTest do
   defp analyze_chunk_patterns(openai_ex_chunks, ai_sdk_chunks) do
     IO.puts("\n==== CHUNK PATTERN ANALYSIS ====\n")
 
-    # Filter only text chunks from AI SDK
-    ai_sdk_text_chunks =
-      ai_sdk_chunks
-      |> Enum.filter(fn
-        {:text_delta, _} -> true
-        _ -> false
-      end)
-      |> Enum.map(fn {:text_delta, text} -> text end)
+    ai_sdk_text_chunks = ai_sdk_chunks
 
     # Count chunks
     openai_ex_chunk_count = length(openai_ex_chunks)

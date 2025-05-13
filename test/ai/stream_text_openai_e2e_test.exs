@@ -39,14 +39,7 @@ defmodule AI.StreamTextOpenAIE2ETest do
           chunks = collect_stream_content(response.stream)
 
           # Join all chunks into the full response
-          full_content =
-            chunks
-            |> Enum.filter(fn
-              {:text_delta, _} -> true
-              _ -> false
-            end)
-            |> Enum.map(fn {:text_delta, text} -> text end)
-            |> Enum.join("")
+          full_content = Enum.join(chunks, "")
 
           IO.puts("\nFull streaming content: #{full_content}")
 
@@ -65,22 +58,7 @@ defmodule AI.StreamTextOpenAIE2ETest do
           assert is_binary(content), "Streaming content should be a string"
 
           # Verify we received multiple chunks (streaming worked)
-          text_chunks =
-            Enum.filter(chunks, fn
-              {:text_delta, _} -> true
-              _ -> false
-            end)
-
-          assert length(text_chunks) > 1, "Should have received multiple stream chunks"
-
-          # Verify we got a finish event
-          finish_events =
-            Enum.filter(chunks, fn
-              {:finish, _} -> true
-              _ -> false
-            end)
-
-          assert length(finish_events) > 0, "Should have received a finish event"
+          assert length(chunks) > 1, "Should have received multiple stream chunks"
 
         {:error, _} ->
           flunk("Failed to get streaming response")
@@ -94,23 +72,13 @@ defmodule AI.StreamTextOpenAIE2ETest do
 
     result =
       Enum.reduce_while(stream, [], fn
-        # Got a text delta, add it to our accumulator and continue
-        {:text_delta, chunk} = event, acc ->
+        # Got a text chunk, add it to our accumulator and continue
+        chunk, acc when is_binary(chunk) ->
           # Print the chunk as it arrives
           IO.write(chunk)
-          {:cont, [event | acc]}
+          {:cont, [chunk | acc]}
 
-        # Got a finish event, add it and halt collection
-        {:finish, reason} = event, acc ->
-          IO.puts("\nFinished: #{reason}")
-          {:halt, [event | acc]}
-
-        # Got an error, add it and halt collection
-        {:error, error} = event, acc ->
-          IO.puts("\nError: #{inspect(error)}")
-          {:halt, [event | acc]}
-
-        # Something else, just add it and continue
+        # Something else. just add it and continue
         other, acc ->
           IO.puts("\nOther event: #{inspect(other)}")
           {:cont, [other | acc]}
@@ -118,7 +86,7 @@ defmodule AI.StreamTextOpenAIE2ETest do
       # Reverse to maintain order
       |> Enum.reverse()
 
-    IO.puts("\nCollected #{length(result)} stream events")
+    IO.puts("\nCollected #{length(result)} stream chunks")
     result
   end
 end

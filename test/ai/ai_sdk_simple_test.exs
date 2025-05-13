@@ -92,15 +92,13 @@ defmodule AI.SDKSimpleTest do
           content_chunks =
             response.stream
             |> Enum.reduce_while([], fn
-              {:text_delta, chunk}, acc ->
+              chunk, acc when is_binary(chunk) ->
                 IO.write(chunk)
                 {:cont, [chunk | acc]}
 
-              {:finish, reason}, acc ->
-                IO.puts("\nFinished streaming: #{reason}")
-                {:halt, acc}
-
-              _, acc ->
+              # Other events (shouldn't happen with new API)
+              other, acc ->
+                IO.puts("\nUnexpected event: #{inspect(other)}")
                 {:cont, acc}
             end)
             |> Enum.reverse()

@@ -19,24 +19,18 @@ To use streaming with the AI SDK, you can use the `AI.stream_text/1` function, w
 # Access the stream from the result
 stream = result.stream
 
-# Process the stream
+# Process the stream - each chunk is a simple string
 stream
-|> Stream.each(fn
-  {:text_delta, chunk} -> IO.write(chunk)  # Write each chunk as it arrives
-  {:finish, reason} -> IO.puts("\nFinished: #{reason}")
-  _ -> :ok
-end)
+|> Stream.each(&IO.write/1)  # Write each chunk as it arrives
 |> Stream.run()  # Start consuming the stream
+
+# Or collect all chunks into a single string
+full_text = Enum.join(stream, "")
 ```
 
-## Stream Events
+## Stream Format
 
-The stream produces different types of events:
-
-1. `{:text_delta, text}` - A chunk of text from the model's response
-2. `{:finish, reason}` - An event indicating the stream has finished with a reason (e.g., "stop", "length")
-3. `{:metadata, data}` - Additional metadata about the response
-4. `{:error, error}` - An error that occurred during streaming
+The stream produces text chunks directly, making it easy to consume and work with. Each chunk is a string fragment of the model's response. The chunk size varies depending on the model and its tokenization.
 
 These events are produced by parsing the Server-Sent Events (SSE) format returned by AI providers. The SDK handles all the complexities of SSE parsing, including multi-line data fields, JSON parsing, and event formatting.
 
@@ -51,10 +45,7 @@ These events are produced by parsing the Server-Sent Events (SSE) format returne
 })
 
 result.stream
-|> Stream.each(fn
-  {:text_delta, chunk} -> IO.write(chunk)
-  _ -> :ok
-end)
+|> Stream.each(&IO.write/1)
 |> Stream.run()
 ```
 
@@ -68,10 +59,7 @@ end)
 })
 
 result.stream
-|> Stream.each(fn
-  {:text_delta, chunk} -> IO.write(chunk)
-  _ -> :ok
-end)
+|> Stream.each(&IO.write/1)
 |> Stream.run()
 ```
 
@@ -85,14 +73,7 @@ If you want to collect all chunks into a single string:
   prompt: "Write a haiku about programming."
 })
 
-full_text = 
-  result.stream
-  |> Stream.filter(fn
-    {:text_delta, _} -> true
-    _ -> false
-  end)
-  |> Stream.map(fn {:text_delta, chunk} -> chunk end)
-  |> Enum.join("")
+full_text = Enum.join(result.stream, "")
 
 IO.puts("Full response: #{full_text}")
 ```
@@ -105,15 +86,11 @@ case AI.stream_text(%{
   prompt: "Tell me a joke."
 }) do
   {:ok, result} ->
+    # Simply process the text chunks
     result.stream
-    |> Stream.each(fn
-      {:text_delta, chunk} -> IO.write(chunk)
-      {:finish, reason} -> IO.puts("\nFinished: #{reason}")
-      {:error, error} -> IO.puts("\nError: #{inspect(error)}")
-      _ -> :ok
-    end)
+    |> Stream.each(&IO.write/1)
     |> Stream.run()
-    
+
   {:error, error} ->
     IO.puts("Failed to start streaming: #{inspect(error)}")
 end
@@ -153,11 +130,6 @@ You can use all of Elixir's stream processing capabilities:
 })
 
 result.stream
-|> Stream.filter(fn
-  {:text_delta, _} -> true
-  _ -> false
-end)
-|> Stream.map(fn {:text_delta, chunk} -> chunk end)
 |> Stream.chunk_by(fn chunk -> chunk == "\n" end)
 |> Stream.reject(fn chunk -> chunk == ["\n"] end)
 |> Stream.map(fn chunks -> Enum.join(chunks, "") end)
@@ -179,11 +151,9 @@ def handle_event("generate", %{"prompt" => prompt}, socket) do
     }) do
       {:ok, result} ->
         result.stream
-        |> Stream.each(fn
-          {:text_delta, chunk} -> 
-            # Send the chunk to the LiveView process
+        |> Stream.each(fn chunk ->
+            # Send each chunk to the LiveView process
             send(self(), {:stream_chunk, chunk})
-          _ -> :ok
         end)
         |> Stream.run()
         
