@@ -3,3 +3,4 @@ _build
 *.iml
 deps
 deps/*
+**/.claude/settings.local.json

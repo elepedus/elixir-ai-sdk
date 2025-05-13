@@ -133,7 +133,7 @@ defmodule AI.Providers.OpenAI.ChatLanguageModelTest do
     setup do
       # Import the mock module for EventSource
       import Mox
-      
+
       # Set expectations to allow the caller process
       # This lets tests set expectations on their own processes
       Mox.allow(AI.Provider.Utils.EventSourceMock, self(), Process.whereis(AI.Finch))
@@ -163,17 +163,21 @@ defmodule AI.Providers.OpenAI.ChatLanguageModelTest do
       ]
 
       # Create a mock response that provides a non-blocking stream
-      mock_response = {:ok, %{
-        status: 200,
-        body: "Streaming initialized",
-        stream: test_stream,
-        config: model.config,
-        headers: %{},
-        model: model.model_id
-      }}
+      mock_response =
+        {:ok,
+         %{
+           status: 200,
+           body: "Streaming initialized",
+           stream: test_stream,
+           config: model.config,
+           headers: %{},
+           model: model.model_id
+         }}
 
       # Use module-under-test pattern to inject our mock
-      old_event_source_module = Application.get_env(:ai_sdk, :event_source_module, AI.Provider.Utils.EventSource)
+      old_event_source_module =
+        Application.get_env(:ai_sdk, :event_source_module, AI.Provider.Utils.EventSource)
+
       Application.put_env(:ai_sdk, :event_source_module, AI.Provider.Utils.EventSourceMock)
 
       # Setup the event source mock expectation
@@ -199,10 +203,10 @@ defmodule AI.Providers.OpenAI.ChatLanguageModelTest do
 
         # Execute the stream call
         {:ok, result} = ChatLanguageModel.do_stream(model, options)
-        
+
         # Verify the results
         assert is_function(result.stream)
-        
+
         # Verify other result properties
         assert result.raw_call != nil
         assert result.warnings == []
@@ -215,9 +219,11 @@ defmodule AI.Providers.OpenAI.ChatLanguageModelTest do
     test "handles streaming error", %{model: model} do
       # Create a mock error response
       mock_error_response = {:error, "Connection error"}
-      
+
       # Use module-under-test pattern to inject our mock
-      old_event_source_module = Application.get_env(:ai_sdk, :event_source_module, AI.Provider.Utils.EventSource)
+      old_event_source_module =
+        Application.get_env(:ai_sdk, :event_source_module, AI.Provider.Utils.EventSource)
+
       Application.put_env(:ai_sdk, :event_source_module, AI.Provider.Utils.EventSourceMock)
 
       # Setup the event source mock expectation
@@ -240,10 +246,10 @@ defmodule AI.Providers.OpenAI.ChatLanguageModelTest do
           seed: nil,
           provider_metadata: %{}
         }
-        
+
         # Call function under test
         result = ChatLanguageModel.do_stream(model, options)
-        
+
         # Verify error is correctly passed through
         assert result == {:error, "Connection error"}
       after
