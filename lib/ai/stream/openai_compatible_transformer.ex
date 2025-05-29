@@ -19,7 +19,6 @@ defmodule AI.Stream.OpenAICompatibleTransformer do
 
     # For test simplicity, if we get a list just process it directly
     if is_list(source_stream) do
-      IO.puts("WHY IS THIS A LIST?")
       # Convert each element in the list
       result = Enum.map(source_stream, &convert_event_to_struct/1)
 
