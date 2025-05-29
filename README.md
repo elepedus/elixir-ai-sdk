@@ -16,7 +16,7 @@ An Elixir port of the [Vercel AI SDK](https://ai-sdk.dev/), designed to help you
 ```elixir
 def deps do
   [
-    {:ai_sdk, "~> 0.1.0"}
+    {:ai_sdk, "~> 0.0.1-rc.0"}
   ]
 end
 ```

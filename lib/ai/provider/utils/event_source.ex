@@ -349,7 +349,10 @@ defmodule AI.Provider.Utils.EventSource do
         if state.data != [] do
           # We have received some data, so emit it and a finish event (if not already emitted)
           events = [format_sse_event(state)]
-          events = if not state.finish_emitted, do: events ++ [{:finish, "complete"}], else: events
+
+          events =
+            if not state.finish_emitted, do: events ++ [{:finish, "complete"}], else: events
+
           {events, %{state | finished: true, finish_emitted: true}}
         else
           # No data received and timeout - continue waiting
@@ -444,11 +447,12 @@ defmodule AI.Provider.Utils.EventSource do
               end
 
             # Update state to track if we emitted a finish event
-            new_state = if not is_nil(finish_reason) and finish_reason != "" and not state.finish_emitted do
-              %{state | finish_emitted: true}
-            else
-              state
-            end
+            new_state =
+              if not is_nil(finish_reason) and finish_reason != "" and not state.finish_emitted do
+                %{state | finish_emitted: true}
+              else
+                state
+              end
 
             {events, new_state}
 
