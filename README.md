@@ -85,7 +85,7 @@ This project is under active development. See the [project roadmap](ROADMAP.md) 
 
 ## Documentation
 
-- [Getting Started](docs/getting-started.md)
+- Getting Started (documentation coming soon)
 - [Streaming Guide](docs/streaming.md) - Real-time text generation with SSE
-- [Tool Calling](docs/tool-calling.md) - Function calling capabilities
-- [Provider Integration](docs/providers.md) - Using different AI providers
+- Tool Calling documentation (coming soon)
+- Provider Integration docs (coming soon)
